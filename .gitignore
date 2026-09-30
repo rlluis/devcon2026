@@ -26,7 +26,6 @@
 /plugins-sdk/lib
 test-results
 
-# Skill eval run output — timestamped reports, traces and cost data.
-# The cases, graders, scaffolds and fixtures ARE tracked: without the
-# fixtures the scaffolds have nothing to stage and the suite cannot run.
 evals/results/
+evals/
+.gemini/settings.json
