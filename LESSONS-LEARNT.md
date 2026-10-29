@@ -996,139 +996,104 @@ a plain `ObjectField_mainImage`.
 
 ---
 
-## 2026-10-15 — Headless CMS Space Categorization: Company scope with assetLibraries association
+## 2026-10-15 — Headless CMS Space Categorization: The L_CMS System Group (20121)
 
-**What happened.** When categorizing custom Object Entries in a Headless CMS Space (`depot` scope),
-passing site-scoped category IDs failed with `400: Asset category <id> does not belong to the object entry's scope`.
-Furthermore, creating a vocabulary directly via the asset library endpoint
-(`postAssetLibraryTaxonomyVocabulary`) created an internal vocabulary that was accepted by the API
-but completely hidden from the Liferay UI under **Space → Categorization → Categories**.
+**What happened.** When attempting to create a taxonomy vocabulary for modern Headless CMS, creating it in the classic Global site (`20129`) or via the specific Asset Library endpoint (`postAssetLibraryTaxonomyVocabulary`) caused the vocabulary to be completely absent from the **Applications → Headless CMS → Categorization** UI.
 
-To make a vocabulary both valid for depot-scoped entries and visible in the Space's UI, it must be
-created at the **Company/Global scope** with an explicit `assetLibraries` association:
-```json
-{
-  "name": "Masterclass",
-  "externalReferenceCode": "VOCAB_MASTERCLASS_SPACE",
-  "visibilityType": "PUBLIC",
-  "multiValued": true,
-  "assetLibraries": [
-    {
-      "id": 143544,
-      "externalReferenceCode": "SPACE-MASTERCLASS-CMS"
-    }
-  ],
-  "assetTypes": [
-    {
-      "type": "AllAssetTypes",
-      "subtype": "AllAssetSubtypes",
-      "required": false
-    }
-  ]
-}
-```
-Posting this body to `POST /v1.0/sites/{companyGroupId}/taxonomy-vocabularies` (`postSiteTaxonomyVocabulary`
-with `siteId: 20121`) creates the vocabulary. Categories added to it via
-`POST /v1.0/taxonomy-vocabularies/{id}/taxonomy-categories` inherit the Space association, render
-in the Space Categorization UI, and bind seamlessly to modern CMS entries via `"taxonomyCategoryIds": [<id>]`.
+**Root cause.** In Liferay DXP, the modern Headless CMS application is underpinned by a dedicated system group named **`CMS`** (`groupId: 20121`, `groupKey: "CMS"`, `externalReferenceCode: "L_CMS"`).
+The Headless CMS Categorization admin UI exclusively queries and renders vocabularies stored under `siteId: 20121`.
+To make a vocabulary render in the Headless CMS Categorization UI and be available across Space content entries:
+1. It MUST be created on the `CMS` system site (`siteId: 20121`):
+   `POST /o/headless-admin-taxonomy/v1.0/sites/20121/taxonomy-vocabularies` (`postSiteTaxonomyVocabulary`)
+2. It MUST configure `assetLibraries: [{"id": -1}]` (to make it available across all Spaces/Asset Libraries) or specify the exact Space ID (`[{"id": <spaceId>}]`), along with `projects: [{"id": -1}]` and `visibilityType: "PUBLIC"`:
+   ```json
+   {
+     "name": "Masterclass",
+     "externalReferenceCode": "VOCAB_MASTERCLASS_CMS",
+     "visibilityType": "PUBLIC",
+     "multiValued": true,
+     "assetLibraries": [{"id": -1}],
+     "projects": [{"id": -1}],
+     "assetTypes": [
+       {
+         "required": false,
+         "subtype": "AllAssetSubtypes",
+         "type": "AllAssetTypes",
+         "typeId": 0
+       }
+     ]
+   }
+   ```
+3. Categories are then added to this vocabulary via `POST /v1.0/taxonomy-vocabularies/{id}/taxonomy-categories`.
+4. Modern CMS object entries are categorized by passing the new category IDs in `"taxonomyCategoryIds": [<newId>]`.
 
 ### Lessons
 
-1. **Space vocabularies live at company scope with an `assetLibraries` association.** Liferay's
-   Space Categorization UI filters vocabularies by looking for company-level vocabularies explicitly
-   linked to the Space's groupId via the `assetLibraries` property array. To automate space vocabulary
-   provisioning, always call `postSiteTaxonomyVocabulary` on the company site (`20121`) passing
-   `"assetLibraries": [{"id": <spaceGroupId>, "externalReferenceCode": "<spaceERC>"}]`. Calling
-   `postAssetLibraryTaxonomyVocabulary` creates an unlinked vocabulary that the UI ignores.
-   *Slide angle: The taxonomy scope paradox: why Space vocabularies belong to the Company.*
+1. **Headless CMS Categorization lives in the `CMS` group (`groupId: 20121`).**
+   Do not confuse the classic portal Global site (`20129` / `L_GLOBAL`) with the modern Headless CMS
+   scope (`20121` / `L_CMS`). Headless CMS taxonomies must be created under `siteId: 20121` with
+   `assetLibraries: [{"id": -1}]`.
+   *Slide angle: The L_CMS discovery: where Headless CMS really looks for its taxonomies.*
 
 ---
 
-## 2026-10-15 — DAM ingestion via fileURL vs base64 and the ERC Recycle Bin trap
+## 2026-10-15 — Headless CMS Content Structure Modeling: title fields, attachment settings, and draft flags
 
-**What happened.** When migrating media assets from an existing site DAM into the modern
-Headless CMS Space (`CMSBasicDocument`), passing image data as inline `file.fileBase64`
-through API request buffers led to truncated payloads. The resulting document saved in
-the Space was corrupt (only a few kilobytes, failing image preview and downloads).
+**What happened.** When migrating legacy structured content models into modern depot-scoped
+Object Definitions for Headless CMS (`scope: "depot"`, `objectFolderExternalReferenceCode: "L_CMS_CONTENT_STRUCTURES"`),
+three critical modeling pitfalls emerged across the UI and API lifecycles:
 
-Additionally, when deleting the corrupted document to recreate it, a subsequent `POST` with
-the same `externalReferenceCode` failed with `400: This external reference code is already in use.`
-Deleting via Headless REST performs a soft delete, moving the entry to the Recycle Bin while
-retaining uniqueness constraints on its `externalReferenceCode`.
-
-Switching to `file.fileURL` pointing directly to the live document endpoint:
-```json
-{
-  "externalReferenceCode": "BLOG_IMG_01",
-  "title": "blog_01.jpg",
-  "objectEntryFolderExternalReferenceCode": "CMS_FOLDER_BLOG_IMAGES",
-  "file": {
-    "name": "blog_01.jpg",
-    "fileURL": "http://localhost:8080/documents/65391/0/blog_01.jpg/cf5929fe-...?download=true"
-  }
-}
-```
-allowed Liferay to stream the uncorrupted binary directly from source to destination at full
-fidelity. For the soft-deleted entry, calling the restore endpoint
-(`PUT .../by-external-reference-code/{erc}/restore`) followed by `PATCH` seamlessly updated
-the record without ERC collisions.
-
-### Lessons
-
-1. **Prefer `fileURL` over Base64 for headless asset migrations.** In modern CMS
-   (`CMSBasicDocument`), inline Base64 strings risk buffer truncation and memory bloat.
-   Supplying `file.fileURL` lets the portal fetch the binary directly over HTTP without
-   intermediate serialization overhead or truncation risks.
-   *Slide angle: Clean asset ingestion: why streaming beats Base64 in headless migrations.*
-
-2. **REST delete is a soft delete.** Deleting an object entry or document sends it to the
-   Recycle Bin, keeping its `externalReferenceCode` reserved. Recreating an entry with the
-   same ERC fails immediately. To replace an existing ERC, either restore and patch the
-   entry or assign a new unique ERC.
-   *Slide angle: The ghost in the trash: handling ERC collisions after REST deletion.*
-
----
-
-## 2026-10-15 — Attachment fileSource in Headless CMS: userComputer vs CMSBasicDocument item selector
-
-**What happened.** When authoring custom depot-scoped Object Definitions intended as Headless
-CMS Content Structures (`scope: "depot"`, `objectFolderExternalReferenceCode: "L_CMS_CONTENT_STRUCTURES"`),
-attachment fields configured with `"fileSource": "userComputerToCMSBasicDocument"` restricted
-the CMS editorial UI to a local disk file-picker only. Users could not browse or select existing
-media assets from the Space's CMS library / DAM. Furthermore, this prevented referencing
-already-migrated CMS documents by their `externalReferenceCode`.
-
-Updating the attachment field settings to `"fileSource": "CMSBasicDocument"`:
-```json
-{
-  "name": "image",
-  "businessType": "Attachment",
-  "objectFieldSettings": [
-    {"name": "acceptedFileExtensions", "value": "jpeg, jpg, pdf, png"},
-    {"name": "maximumFileSize", "value": 100},
-    {"name": "fileSource": "CMSBasicDocument"}
-  ]
-}
-```
-enabled the full **Item Selector** in the CMS editor, granting users the ability to both
-browse/select existing media assets in the library and upload new files from their computer.
-Crucially, Liferay allows live patching of `objectFieldSettings` on published attachment
-fields via `PATCH /o/object-admin/v1.0/object-fields/{id}` without deleting or recreating
-the object definition.
+1. **"Untitled Asset" in Content Listings:** In Headless CMS, the content listing table (Frontend Data Set / FDS table)
+   relies on the Object Definition's `titleObjectFieldName` property and looks for a localized text field named `title`.
+   When `Blog` was created, its legacy structure already had a field named `Title` mapped to `title`. But `Teacher`
+   and `Course` used `name`, and `Classroom` used `courseName`, while `titleObjectFieldName` was left unset (defaulting
+   to `externalReferenceCode`). As a result, the CMS frontend fell back to `Liferay.Language.get('untitled-asset')`
+   ("Untitled Asset"). Every custom CMS structure must declare a non-system, localized `title` field (`"name": "title"`,
+   `"required": false`, `"localized": true`, `"system": false`) and configure `"titleObjectFieldName": "title"`.
+2. **Restricted Item Selector (`fileSource`):** Configuring attachment fields with `"fileSource": "userComputerToCMSBasicDocument"`
+   locked the CMS editorial UI to local disk uploads only. Users could not browse or select existing media from the
+   Space library, nor could Headless API calls link documents by `externalReferenceCode`. Changing the setting to
+   `"fileSource": "CMSBasicDocument"` enables the full **Item Selector** (both library browsing and desktop upload).
+   Crucially, `objectFieldSettings` on published attachment fields can be patched live via
+   `PATCH /o/object-admin/v1.0/object-fields/{id}` without recreating the object definition.
+3. **Mandatory Draft & Versioning Flags:** Editorial CMS structures must enable draft (`"enableObjectEntryDraft": true`)
+   and versioning (`"enableObjectEntryVersioning": true`). Without these flags, CMS UI deletions fail, and lifecycle
+   operations (scheduled publishing, draft previews) return errors.
+4. **Linking CMSBasicDocument Attachments Requires the Internal File ID (`file.id`):** When populating an Object attachment
+   field configured with `"fileSource": "CMSBasicDocument"`, passing only `"externalReferenceCode"` and `"name"` causes Liferay
+   to create a detached empty attachment with `size: "0 B"` under `/documents/<scopeId>/0/...` instead of referencing the uploaded
+   document. To link to the real binary, the payload MUST pass the numeric primary key of the underlying file inside the
+   `CMSBasicDocument`:
+   ```json
+   "image": {
+     "id": cmsBasicDoc["file"]["id"],
+     "name": cmsBasicDoc["file"]["name"]
+   }
+   ```
+   This resolves the attachment to the full-size media asset (`/documents/<spaceId>/<folderId>/...`, full KB) and allows DPTs and
+   Collection Displays to render the image properly.
 
 ### Lessons
 
-1. **`CMSBasicDocument` gives both choices, `userComputer` locks to local only.** In modern
-   CMS structures, always prefer `"fileSource": "CMSBasicDocument"`. It provides the complete
-   Item Selector experience (library browsing + direct upload) and allows Headless API entries
-   to link media assets by `externalReferenceCode`.
+1. **"Untitled Asset" signals a missing title field or misconfigured titleObjectFieldName.**
+   Always include a non-system, localized `title` field and set `"titleObjectFieldName": "title"`
+   on the Object Definition so entries display their real titles in the Headless CMS content browser.
+   *Slide angle: Taming the "Untitled Asset": why CMS structures mandate titleObjectFieldName.*
+
+2. **`CMSBasicDocument` gives both choices; `userComputer` locks to local only.**
+   In modern CMS structures, always configure attachment fields with `"fileSource": "CMSBasicDocument"`
+   to support both library item selection and direct desktop upload.
    *Slide angle: Field settings that empower editors: why fileSource choice dictates DAM integration.*
 
-2. **Published field settings are live patchable.** Unlike structural constraints (such as
-   renaming fields or toggling versioning), `objectFieldSettings` on attachment fields can be
-   updated via `PATCH /v1.0/object-fields/{id}` on live, published definitions without data loss
-   or schema reprovisioning.
+3. **Published field settings are live patchable.** Unlike structural constraints,
+   `objectFieldSettings` on attachment fields can be updated via `PATCH /v1.0/object-fields/{id}`
+   on live definitions without data loss or reprovisioning.
    *Slide angle: Painless schema iteration: what you can and cannot patch live in Liferay Objects.*
+
+4. **Attachment fields must be populated with `file.id`, not document ERC alone.**
+   When populating an Object entry over Headless REST, an attachment field with `fileSource: "CMSBasicDocument"`
+   requires `"id": doc["file"]["id"]`. Passing only the document's ERC generates an empty 0-byte attachment.
+   *Slide angle: The 0-byte attachment trap: why Object attachments demand file.id.*
 
 ---
 
