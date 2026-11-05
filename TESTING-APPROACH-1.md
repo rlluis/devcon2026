@@ -5,8 +5,9 @@ fails. The steps follow [README.md](README.md#running-approach-1) literally; the
 in [`scripts/`](scripts) do the waiting and checking.
 
 A run is **clean** when every stage below passes with no manual permission changes. The
-only allowed step after provisioning is the scripted, documented activation of the demo
-student (stage 5). Take the stage snapshot from a clean run only.
+only allowed steps after provisioning are the two scripted, documented ones in stage 5:
+activating the demo student, and making the instance open the Masterclass site. Take the
+stage snapshot from a clean run only.
 
 The commands assume an LDM project called `devcon2026` in `~/ldm-verify/devcon2026`, with
 a snapshot `clean-2026q3.5` that holds no Masterclass data, and the admin
@@ -15,26 +16,178 @@ a snapshot `clean-2026q3.5` that holds no Masterclass data, and the admin
 
 ## Recording the run
 
-To record the whole run, use two terminal windows. On macOS, `scripts/record-layout.sh` opens both side by side in Terminal.app, with a large font, descriptive titles and the top-right corner left clear for a clock (`SCREEN_NAME=Built-in` for the laptop screen, `MENU_BAR=0` when the menu bar is hidden).
+The whole run, from a clean snapshot to the stage snapshot, recorded in one take. It takes
+about 7 minutes, almost all of it provisioning (rehearsed on 2026-10-19):
 
-**Logs.** The restore tears the Liferay container down, which ends a plain `ldm logs -f`, so
-wrap it in a loop that reconnects when Liferay comes back:
+| Stage | Time |
+| --- | --- |
+| 1. Build | about 25 s |
+| 2. Provision | about 5 m 45 s |
+| 3. to 6. Checks and the demo student | about 30 s |
+
+### Before you record
+
+1. **Merge what you are recording into 02**, then move the worktree to it. Nothing needs
+   rebuilding by hand; stage 1 builds:
+
+   ```bash
+   cd ../devcon2026-test
+   git fetch upstream
+   git checkout --detach upstream/02-aiconversion
+   ```
+
+1. **Check the shared search container is running.** A missing `liferay-search-global`
+   breaks the restore (stage 0). `ldm-provision.sh` refuses to start without it, but it is
+   better found now than on camera:
+
+   ```bash
+   docker ps --format '{{.Names}}' | grep liferay-search-global
+   ```
+
+1. **Check that Docker's clock agrees with the Mac's.** The log's timestamps come from
+   Docker's virtual machine and the time-lapse clock from the Mac, so they only line up if
+   the two clocks do. With the instance running:
+
+   ```bash
+   python3 -c "import subprocess, time; m = time.time(); d = float(subprocess.check_output(['docker', 'exec', 'devcon2026', 'date', '-u', '+%s.%N'])); print(f'Docker minus Mac: {d - m:+.2f} s')"
+   ```
+
+   Anything within about half a second is fine (measured +0.08 s on 2026-10-19, part of it
+   the command's own delay). A larger gap means Docker's clock has drifted; restarting
+   Docker Desktop resyncs it.
+
+1. **Lay out the screen** (macOS, Terminal.app), from the worktree:
+
+   ```bash
+   MENU_BAR=0 scripts/record-layout.sh
+   ```
+
+   It finds the 1920x1080 display and opens two windows on it, in a "Recording" profile:
+   Menlo 20 pt, dark by default, with titles that say what each window shows. The top-right
+   300x350 is left clear for a clock. Running it again replaces both windows.
+
+   | Window | Shows |
+   | --- | --- |
+   | Liferay server log (live), left | `scripts/follow-logs.sh`: the project's consolidated `ldm logs`, each line keeping its `service \|` prefix, the message coloured by what it says |
+   | Approach 1: build, provision and check, right | the worktree, with `scripts/record-approach-1.sh` typed at the prompt, waiting for Enter |
+
+   | Option | Default | Use |
+   | --- | --- | --- |
+   | `MENU_BAR` | `30` | `0` when the menu bar is hidden; otherwise it keeps clear the menu bar macOS doesn't report on a second display |
+   | `SCREEN_NAME` | none | lay out another display by name, for example `Built-in` |
+   | `THEME` | `dark` | `light` for a white background |
+
+1. **Set up the screen recording:** the 1920x1080 display, **SDR** (not HDR; the content
+   and the playback are SDR, and HDR comes out washed out when converted), 30 fps.
+
+### Recording
+
+Start the screen recording, then press Enter in the right window.
+
+`record-approach-1.sh` runs stages 1 to 6 below in order. Before each stage it shows a
+banner and waits for Enter, so you set the pace. Each command is printed as `$ …` before it
+runs, with every `--user` password shown as `****`. It passes the group id on by itself,
+stops at the first stage that fails, and ends with the time each stage took.
+
+What to expect, and what to say about it:
+
+| Moment | In the log window | In the run window |
+| --- | --- | --- |
+| Restore | Red `FATAL` lines from `devcon2026-db`: the restore starts from an empty database (`database "lportal" does not exist`) and stops Liferay while it is still connected (`connection to client lost`). Then `container restarted, reconnecting`. Nothing red once Liferay is back up. | `$ ldm restore …`, then `Liferay ready` |
+| Deploys | Green `STARTED` for each module and client extension | One `$ cp …` per artifact |
+| Site creation | Cyan `Invoking …` handler steps, then bold green `Initialized com.liferay.site.initializer.masterclass.cms` | `handler order ok`, or `RACE` and a second provision (see stage 2) |
+| Data batch | Bold green `Successfully deployed batch engine file` for each of the seven files | `batch files deployed: 7` |
+| Checks | Quiet | `ok` lines; two `WARN` lines in the student checks are the known self-approve issue |
+
+At the end it asks for a snapshot name. Use `masterclass-02-<short commit>`; Enter skips.
+Stage 8, the browser check, stays manual: do it after the snapshot, so the Pending
+enrolment it creates is not in it.
+
+`PAUSE=0` runs straight through without stopping; `SNAPSHOT=<name>` takes the snapshot
+without asking. To follow the logs without the layout script:
 
 ```bash
-while true; do ldm logs -f devcon2026; sleep 2; done
+scripts/follow-logs.sh
 ```
 
-**Stages.** From the checkout under test:
+### Making the time-lapse
+
+For other recordings, Windows, and a prompt for an AI session, see [TIMELAPSE.md](TIMELAPSE.md).
+
+One command does it, while the recorded instance is still up:
 
 ```bash
-scripts/record-approach-1.sh
+python3 scripts/make-timelapse.py
 ```
 
-It runs stages 1 to 6 below in order, with a banner and a pause before each, so you press
-Enter when you are ready for the next. It passes the group id on by itself, stops at the
-first stage that fails, and at the end asks for a snapshot name (Enter skips). `PAUSE=0`
-runs straight through; `SNAPSHOT=<name>` takes the snapshot without asking. Stage 8, the
-browser check, stays manual.
+It takes the newest `Screen Recording*.mov` on the Desktop (or a file you name), and:
+
+1. renames it `approach-1-<commit>-<YYYYMMDD-HHMM>.mov` (`--name` to choose);
+1. trims the still stretches at either end: from a second before the first change in the
+   run window (so the pointer moving doesn't count) to two seconds after the last change on
+   screen, cutting on a whole second and writing the trimmed file's own start time, so the
+   clock stays exact;
+1. renders `<name>-timelapse.mp4` with the clock below, at `--speed 15 --tz UTC` and
+   `--style digital --dual --size 260` (anything after `--` replaces those clock options);
+1. runs the spot check below and saves `<name>-clock-check.png`.
+
+On 2026-10-19 it cut a 6 min 7 s take to 5 min 44 s and rendered 22.6 s at 15x; the
+check frame showed 17:52:22 on the clock as the `Initialized` line stamped 17:52:22.802
+arrived. The rest of this section is what it does, step by step, for running by hand.
+
+`scripts/clock_overlay.py` speeds the recording up and draws a clock in the corner the
+layout left clear. The clock keeps **real** time while the video runs fast, so it races
+during provisioning and still lines up with the timestamps in the log window. Run it on
+the full, uncut recording, then trim:
+
+```bash
+python3 scripts/clock_overlay.py "<recording>.mov" "<recording>-timelapse.mp4" \
+	--speed 15 --tz UTC --style digital --dual --size 260
+```
+
+This is the form used for the talk: a digital time of day that reads like the log's
+timestamps, with an elapsed-time panel under it, so the time-lapse shows both when each
+step happened and how long the run has taken. At `--size 260` it is 260 x 222 px, the
+largest that fits the clear corner's width.
+
+- **`--tz UTC`**, because Liferay's log timestamps are in UTC. The clock starts at the time
+  read from the recording's metadata, converted to `--tz` (default: this Mac's zone). It
+  prints that time before rendering; check it against the first log line in the recording.
+  Use `--start HH:MM:SS` only if the metadata is missing.
+- At `--speed 15`, a 12 minute take becomes about 50 seconds.
+- `--style analog|digital|both` chooses the clock, `--dual` adds an elapsed-time panel
+  under it, and `--start zero` turns it into a stopwatch.
+- `--subsec tenths|ms` adds sub-second digits to the digital elapsed readouts
+  (`--subsec-on all` adds them to the time of day too, though its start is only known to the
+  second). Each frame covers speed/30 s of real time, so at `--speed 15` even tenths only
+  show `.0` and `.5`; the script says so. Sub-seconds suit real-time clips, not the time-lapse.
+- **It has to fit the clear corner**: 310 px of height below its 40 px margin, at the
+  default `CLOCK_H=350`. At the default `--size 220`, analog with its label is 268 px and
+  fits; analog with `--dual` (333 px) or `--style both` (353 px) does not. Use `--size 200`
+  with `--dual`, or lay the screen out with a taller corner, such as
+  `CLOCK_H=420 scripts/record-layout.sh`, before recording.
+
+**Check the clock against the log.** Pick an event whose exact time the log records, find
+the frame where it appears, and compare the clock with the newest log line. The site
+initializer's `Initialized` line works well: it appears once, in bold green, near the end
+of provisioning. Run this while the recorded instance is still up, since `docker logs` only
+covers the current container:
+
+```bash
+REC="<recording>.mov"; TL="<recording>-timelapse.mp4"; SPEED=15
+EVENT=$(docker logs devcon2026 2>&1 | grep -m1 "Initialized com.liferay.site.initializer" | cut -c1-23)
+START=$(ffprobe -v error -show_entries format_tags=creation_time -of default=nw=1:nk=1 "$REC")
+AT=$(python3 -c "from datetime import datetime as d; e = d.fromisoformat('$EVENT+00:00'); s = d.fromisoformat('$START'.replace('Z', '+00:00')); print(round((e - s).total_seconds() / $SPEED, 2))")
+echo "$EVENT should appear at ${AT}s"
+ffmpeg -loglevel error -y -ss "$AT" -i "$TL" -frames:v 1 clock-check.png && open clock-check.png
+```
+
+The clock should read the event's second, give or take one, with the `Initialized` line
+just appearing at the bottom of the log window. On 2026-10-19 the line stamped 16:46:36.226
+appeared between the clock reading 16:46:35 and 16:46:37. If they are further apart,
+re-render with `--start HH:MM:SS` set to the corrected start time.
+
+It needs `ffmpeg` (`brew install ffmpeg`) and Pillow (`pip3 install pillow`).
 
 ## The one rollback that always works
 
@@ -113,7 +266,13 @@ export line. Stage 3 still checks the result.
 
 - `Initialized com.liferay.site.initializer.masterclass.cms … in N ms`
 - `batch files deployed: 7`, and nothing under `Unable to deploy batch`
-- nothing under `errors since restore`
+- under `errors since restore`, only the known start-up and site-creation loggers:
+  `HeadlessDisplayTag` and `BaseDisplayTag` (data set tags rendered before their serializer
+  is up, a few seconds after Liferay starts) and `RESTClientTemplateContextContributor` (2,
+  fragments rendered while the site is being built), and sometimes `ElasticsearchIndexWriter`
+  and `BulkDocumentRequestExecutor` (a search delete for an entry that wasn't indexed). Any
+  other logger is worth reading;
+  see LESSONS-LEARNT.md, "The red in the log is the platform warming up"
 - the new site's id, then a line `export MASTERCLASS_GROUP_ID=<id>`. **Paste that line
   into your shell.** The later scripts read it, print which site they are checking, and
   stop if it is not set. The id can change between runs, so paste the new line after every
@@ -178,15 +337,29 @@ Users created by a site initializer are inactive by design: `BundleSiteInitializ
 each one to inactive after creating it (LPS-184738), so an initializer can't silently
 create accounts that can sign in. The script:
 
-1. activates `student.one@liferay.com` and checks it can sign in. This is the one allowed
-   post-provision step;
-2. as the student, enrols in **Building Enterprise Websites with Liferay** with the register
+1. activates `student.one@liferay.com` and checks it can sign in;
+2. makes the instance open the Masterclass site instead of the default Welcome site: the
+   Home URL becomes `/web/masterclass-cms`, signing in lands on the site's home page (or on
+   My Learning with `LANDING=my-learning`), and signing out on `/web/masterclass-cms`
+   (Instance Settings > Instance Configuration > General). A site initializer can't set
+   instance settings. It finds the instance from `LIFERAY_URL`'s host, and the Home URL update sends every other company field back
+   unchanged, because it replaces them all, the virtual host included;
+3. as the student, enrols in **Building Enterprise Websites with Liferay** with the register
    button's payload; as admin, approves; as the student, confirms;
-3. checks My Learning shows the course.
+4. checks My Learning shows the course.
 
-It is safe to run again: a course that is already Confirmed is kept.
+Steps 1 and 2 are the only allowed post-provision changes. It is safe to run again:
+settings already in place, and a course already Confirmed, are kept.
 
-**Expect** `My Learning shows 'Building Enterprise Websites with Liferay'`.
+**For the stage fallback, land on My Learning:** the live demo starts there, so run the take
+with `LANDING=my-learning PAUSE=0 scripts/record-approach-1.sh`; `record-approach-1.sh`
+passes it on to this script.
+
+The rule **one registration per student per session** is already in place by now: the
+workarounds module adds it while the site is created (see its README).
+
+**Expect** `http://localhost:8080/ opens 'Home - Masterclass CMS - Liferay'` and
+`My Learning shows 'Building Enterprise Websites with Liferay'`.
 
 **If it fails**
 
@@ -207,6 +380,9 @@ scripts/student-check.sh
 
 **Expect** `0 failure(s), 2 warning(s)`. The two warnings are a known issue, logged and not
 fixed before DevCon: an enrolment's owner can approve it, or set its status, themselves.
+Among the passes, `a second registration for the same session is refused` shows the
+workarounds module's session rule is in place. If it fails, look for `Added composite key
+rule` (or `Unable to add composite key rule`) in the log from site creation.
 
 The script checks that the student can sign in, read every course object and the
 MyCourseSession lookup the register button makes, sees the Confirmed course from stage 5,
@@ -253,26 +429,79 @@ in it.
 back to stage 1. If you need a working instance in the meantime, restore the previous
 fallback (below).
 
-## On stage
+## Before the talk
+
+Both approaches run from Peter's laptop, as two LDM projects side by side, each on its own
+host name (added to `/etc/hosts` with `ldm fix-hosts`):
+
+| Approach | LDM project | URL | Stage snapshot |
+| --- | --- | --- | --- |
+| 1 (Peter) | `devcon2026` | `http://approach1.devcon.demo:8080` | `masterclass-02-3c9a590` |
+| 2 (Rafa) | `masterclass-approach2` | `http://approach2.devcon.demo:8081` | `masterclass-approach2-063ee2f` |
+
+Nothing is restored on stage: a restore takes minutes, and its search index can come back
+dead (LDM #2316). Switching between the approaches is switching Chrome profile.
+
+Get both ready with one command, before the talk:
 
 ```bash
-cd ~/ldm-verify/devcon2026
-ldm restore devcon2026 -n masterclass-02-<short commit> --up -y
+cd /Volumes/SanDisk/repos/devcon2026
+RESTORE_MINE=1 scripts/prepare-stage.sh
 ```
 
-Then sign in as the demo student and register for a second course, as in stage 8.
+It starts Colima with the 6 CPUs and 16 GiB both instances need (with the SanDisk drive
+mounted: Colima lives on it), starts the search node, restores both instances, runs
+`demo-prep.sh` on Approach 1 and
+waits for both search indices. **Expect** it to end with `== ready` and both URLs. Without
+`RESTORE_MINE=1` it leaves Approach 1's data as it is; restore it after any rehearsal of the
+registration, because a rehearsal leaves a Pending registration behind and the one
+registration per session rule (#100) then refuses the same registration on stage.
 
-**If the restore fails or the site looks wrong**
+Why the steps after the restores:
+
+- **Approach 1 loses its instance settings on restore.** On 2026-11-01 the first start after
+  a restore emptied the Home URL and deleted the default landing and logout pages, although
+  the snapshot has them. `demo-prep.sh` puts them back: without it, `/` opens the Welcome
+  site and signing in lands there too.
+- **Approach 2 needs three fixes after a restore**, made by `scripts/restore-approach2.sh`.
+  It drops the index prefix the restore brings back (LDM #2315), which otherwise empties
+  Approach 1's index, as it did on 2026-11-02. It starts the JVM without
+  `TieredStopAtLevel=1` (LDM #2308), and switches the MCP server on.
+
+Then, in each Chrome profile (a restart signs everyone out):
+
+1. **Peter's**, in a private window and without registering for anything:
+   - `/` opens the Masterclass home page;
+   - signing in as `student.one@liferay.com` / `test` lands on My Learning, showing
+     **Building Enterprise Websites with Liferay**;
+   - signing out returns to the Masterclass home page.
+
+   Then sign in as an administrator and leave the Model Builder open.
+2. **Rafa's**: sign in to `http://approach2.devcon.demo:8081` as `test@liferay.com` and open
+   the CMS admin screens he shows; the Space's contents should be listed.
+
+## On stage
+
+1. Play the time-lapse of the run.
+2. Sign in as the demo student and show their profile and My Learning.
+3. Register for a session of a course **other than** Building Enterprise Websites. Course
+   Registrations shows it as **Pending**.
+4. Switch to the Model Builder and walk through the objects and their relationships.
+
+**If the site looks wrong**
 
 | Symptom | Do this |
 | --- | --- |
 | `Global search service not running` | Start `liferay-search-global`, then restore again. |
-| Lists or collections are empty | Check `docker ps` for `liferay-search-global`; if it is there, restore again. |
+| `/` opens the Welcome site, or signing in lands there | Run `SKIP_APPROACH2=1 scripts/prepare-stage.sh`: it re-runs `demo-prep.sh` on Approach 1 without restoring anything. |
+| Lists or collections are empty | Check `docker ps` for `liferay-search-global`. If it is there, check the instance's index: `docker exec liferay-search-global curl -s localhost:9200/ldm-devcon2026-68894291378179/_count` (or `ldm-masterclass-approach2-…`). A 503 means a dead shard (LDM #2316): `docker restart liferay-search-global`, then `docker restart` the instance, and wait for its reindex. |
 | Anything else | Restore the previous fallback snapshot and use the recorded backup video. |
 
 ## Fallback snapshots
 
 | Snapshot | Contents | Use |
 | --- | --- | --- |
-| `masterclass-02-<short commit>` | The latest clean run of this procedure | Stage, recording |
+| `masterclass-02-<short commit>` | The next clean run of this procedure, taken at the end of the recording | Stage, once it passes stage 8 |
+| `masterclass-02-3c9a590` | 02 at `3c9a590`, tagged `devcon-approach-1`: every stage passed with `LANDING=my-learning`, browser check included (2026-10-21). It has the one registration per session rule (#100) and opens on My Learning (#103), once `demo-prep.sh` has been re-run after the restore (see "Before the talk") | **Stage fallback** |
+| `masterclass-02-b0684c3` | 02 at `b0684c3`: the recorded take of 2026-10-19, every stage passed. It has neither the session rule nor the Masterclass landing | Previous fallback, if `3c9a590` will not restore |
 | `masterclass-02-7de77b5` | 02 at `7de77b5`: everything except the demo student | Last resort; it has no demo student, so stage 8 cannot be shown |

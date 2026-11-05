@@ -528,11 +528,11 @@ For Many-to-Many relationships:
 
 - To display media in the CMS UI (`Files` tab), documents must be imported as `CMSBasicDocument` entries (`className: "com.liferay.object.rest.dto.v1_0.ObjectEntry"`, `taskItemDelegateName: "CMSBasicDocument"` — system objects do not use `C_`).
 - Custom folders must be created as `com.liferay.headless.object.dto.v1_0.ObjectEntryFolder` with `parentObjectEntryFolderExternalReferenceCode: "L_FILES"`.
-- Custom object attachment fields configured with `"fileSource": "CMSBasicDocument"` should reference the uploaded CMS file by its `externalReferenceCode`:
+- Custom object attachment fields configured with `"fileSource": "CMSBasicDocument"` must link the uploaded CMS file by its internal **`file.id`** (the numeric ID of the binary file inside `CMSBasicDocument`), not the document's ERC alone. Passing only `externalReferenceCode` creates a detached 0-byte attachment under `/documents/<scopeId>/0/...`:
 ```json
 "representativeImage": {
-  "name": "image.jpg",
-  "externalReferenceCode": "FILE-IMAGE-ERC"
+  "id": <cmsBasicDocument.file.id>,
+  "name": "image.jpg"
 }
 ```
 

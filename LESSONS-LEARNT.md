@@ -21,9 +21,334 @@ PR, commit, or measurement), so a claim on a slide can be traced back to somethi
 | How | AI rewrites the initializer tree; the site is recreated from it | AI calls the Headless APIs and MCP against the live site; no initializer involved |
 | Lessons | [Approach 1](#approach-1-site-initializer-to-site-initializer) | [Approach 2](#approach-2-live-site-migrated-in-place) |
 
+## Decisions
+
+Calls made along the way that shape what is shown on stage. Newest first; each says who
+agreed it and where the change landed.
+
+| Date | Decision | Why | Where |
+| --- | --- | --- | --- |
+| 2026-11-02 | Rafa's live demo runs on a second instance on Peter's laptop, `approach2.devcon.demo:8081`, from snapshot `masterclass-approach2-063ee2f`; both instances are started and checked before the talk, and nothing is restored during it | Both approaches may be shown from one laptop. Rafa shows his time-lapse, then the finished site and the CMS admin. A restore took 223 s plus a reindex and once came back with a dead search index. Peter | LDM project `masterclass-approach2`, entry below |
+| 2026-11-01 | Re-run `demo-prep.sh` after every restore of the stage instance | Restoring the fallback snapshot with LDM 2.26.7 emptied the Home URL and deleted the landing and logout pages, though the snapshot has them. Re-running is safe and takes seconds, and works whatever the cause turns out to be. Peter | `TESTING-APPROACH-1.md` "On stage" |
+| 2026-10-21 | The stage fallback is now snapshot `masterclass-02-3c9a590`, and `devcon-approach-1` moves to that commit; the provisioning time-lapse recorded on 2026-10-19 from `b0684c3` is kept | The snapshot needed the session rule (#100) and the instance opening the Masterclass site, landing on My Learning (#103). A fresh take of merged 02 with `LANDING=my-learning` passed every stage. The time-lapse shows the same provisioning; only the post-provision steps changed. Peter | tags, `TESTING-APPROACH-1.md` |
+| 2026-10-20 | The instance opens the Masterclass site, not the default Welcome site: Home URL, landing page (the site's home page, or My Learning with `LANDING=my-learning`, which the stage fallback uses) and logout page, set by `demo-prep.sh` | Found while testing in the browser: signing in and out led to the Welcome site. A site initializer can't set instance settings, and they aren't a fix to the data model, so they go in the demo script, as its second scripted post-provision step. The landing page is one switch in the script; landing on My Learning makes the live demo's first step happen by itself. The site's own sign-in fragment, carried over from 2024, hard-coded a redirect to `/home` that beat the instance setting, so it was removed (a fragment setting for it was tried and dropped: one switch, in the script, was wanted); the private area's logo now links to the site's home page. Peter | `scripts/demo-prep.sh`, `masterclass-sign-in`, private-area master page |
+| 2026-10-20 | The demo student stays activated by `demo-prep.sh`, not by the workarounds module | The initializer creates users inactive on purpose (LPS-184738), so it can't silently create accounts that can sign in; activating them automatically in a module would undo that quietly. A visible, scripted exception keeps it honest, and the script is needed anyway for the prepared enrolment. The time-lapse was also already recorded with this flow. Peter | `scripts/demo-prep.sh` |
+| 2026-10-20 | Prevent a student registering twice for the same session with a composite key rule, in the workarounds module | Rafa built this live in 2024; the site initializer can't declare it (item 8). Rafa asked whether one OSGi module could replace the script altogether. It can't sensibly (see the row above), so the line is drawn by purpose: fixes to the data model go in the module, where they apply to every site created from the tree; steps taken only for the stage stay in the script. Peter and Rafa | #100 |
+| 2026-10-19 | The time-lapse runs at 15x with a digital UTC clock and an elapsed panel; the backup video of the live enrolment stays real time, with no clock | The clock matches the log timestamps, so the audience can see both when each step happened and how long it took. A live action should play at its real pace | #98, #99 |
+| 2026-10-19 | The recorded take is the stage fallback: snapshot `masterclass-02-b0684c3`, tagged `devcon-approach-1` (superseded 2026-10-21, above) | Every stage passed, the browser check included. Later 02 commits only add the time-lapse tooling | tags, `TESTING-APPROACH-1.md` |
+| 2026-10-19 | Master becomes the converted site; the before state is kept as the tag `devcon-start` | People will look at master. A tag keeps the starting point one checkout away | #92, #96 |
+| 2026-10-19 | Leave the database's red `FATAL` lines during the restore red, and explain them | They are real: the restore starts the database from empty and stops Liferay while it is connected. Nothing red appears after Liferay is back up | narration |
+| 2026-10-19 | Students approving or completing their own enrolment is a known issue, logged and not fixed before DevCon | The stage flow doesn't depend on it; `student-check.sh` reports it as a warning | entry below |
+| 2026-10-19 | Only scripted, documented steps after provisioning: activating the demo student (and, from 2026-10-20, opening the Masterclass site). Any manual permission change makes a run unclean | Everything on stage has to come from the tree, the batch or a script in the repo | #88, `TESTING-APPROACH-1.md` |
+| 2026-10-19 | Give the demo student a Confirmed course by running the real flow (enrol, admin approves, student confirms) before the snapshot, rather than seeding one | An enrolment created by the initializer or batch is owned by the admin, and students only see enrolments they own | #88 |
+| 2026-10-19 | Pending stays the real behaviour. On stage the student registers for a second course and shows it Pending on Course Registrations; no demo-only shortcut to Confirmed | Peter and Rafa | #88 |
+| 2026-10-19 | The demo student is created by the site initializer, as a Site Member, with no custom role | All of it must come from the tree, so a clean provision is stage ready. Rafa | #86 |
+| 2026-10-19 | Demo 1 shows an already provisioned site plus a short time-lapse of the provisioning; nothing is provisioned live. Guest self registration is out of scope | Provisioning takes 6 to 11 minutes and can hit the collection race. Peter and Rafa | `TESTING-APPROACH-1.md` |
+| 2026-10-16 | Two use cases, 20 minutes each: Approach 1 (initializer to initializer) and Approach 2 (live site migrated in place) | Peter and Rafa, after the 2026-10-14 meeting | the table above |
+
 ---
 
 # Approach 1: site initializer to site initializer
+
+## 2026-11-01 — The snapshot was right; the restore lost the settings
+
+**What happened.** Restoring the stage fallback, `masterclass-02-3c9a590`, opened the
+Welcome site again: the Home URL was empty, and signing in and out went to the default
+pages. The snapshot was fine: its database dump has the Home URL `/web/masterclass-cms` and
+both page preferences. The live database showed the company record rewritten at 09:16:19,
+three seconds before Tomcat finished starting, with the Home URL empty and the two
+preference rows gone.
+
+The restore lost them; a plain restart afterwards did not. Liferay rewrote the
+company record at startup again, and the settings survived. The prime suspect was a tool
+update. LDM was updated on 2026-10-23, two days after the snapshot, and now starts Liferay
+with `company.default.virtual.host.sync.on.startup=true`, which rewrites the company record
+on every boot. But the restart shows the sync alone doesn't drop the settings, and the
+virtual host row is the same in the snapshot and the live database. What differs on the
+first boot after a restore is not yet known.
+
+**What we did.** Put the settings back by re-running `demo-prep.sh`, which is safe to
+re-run (the student and their Confirmed course are kept), and made that the step after
+every restore in "On stage". The loss goes to LDM as an issue.
+
+**Evidence.** The snapshot's `database.sql` (company `homeurl` and `portalpreferencevalue`
+rows 201 and 202) against the live database after the restore; `docker-compose.yml`
+regenerated at the restore with the two `LIFERAY_COMPANY_PERIOD_DEFAULT_PERIOD_VIRTUAL_PERIOD_HOST_…`
+variables, which the snapshot's `meta` doesn't list; a `docker restart` at 09:52, after
+which the company record was rewritten and the settings were still there.
+
+### Lessons
+
+1. **A snapshot captures the data, not the environment it starts in.** Anything that runs
+   at startup can change what a restore gives you, and the tools around the snapshot keep
+   changing after it is taken.
+   *Slide angle: Same snapshot, new tool, different site.*
+
+1. **Check after the restore, not only before the snapshot.** The settings were verified
+   when the snapshot was taken, and were still lost. Only looking at the restored site
+   caught it, and the stage day is too late to find out.
+
+1. **Settings applied by a script belong to the script.** Re-running `demo-prep.sh` put
+   them back in seconds, because it was written to be re-run.
+
+1. **Test the explanation before you write it down.** The first account blamed every start
+   of Liferay; one restart disproved it, before the change was merged.
+
+---
+
+## 2026-10-20 — One registration per session: the rule the initializer couldn't declare
+
+**What happened.** Nothing stopped a student registering for the same session twice. In
+2024 Rafa added a composite key validator live; this time the site initializer can't
+declare it, because a rule on relationship fields needs them to exist, and the initializer
+creates relationships after the object definitions (UPSTREAM-FEEDBACK.md item 8, Discuss
+#1074). It went first into `demo-prep.sh` as a REST call, then, at Rafa's suggestion, into
+the workarounds module with the other fixes to the model, where it applies to every site
+created from the tree. A listener adds the rule when MyCourseEnrollment is published.
+
+Testing it found three things the code review didn't:
+
+1. **A caught exception still rolled the site back.** Publishing marks the definition
+   approved before it creates the object's table. Adding the rule inside that transaction
+   queried the missing table, and on PostgreSQL a failed statement aborts the whole
+   transaction, so the site creation rolled back although the exception was caught and
+   logged. The rule is now added after the transaction commits, in its own.
+1. **A composite key can't be added once the object has data.** The platform refuses it
+   when existing entries already have values in the fields, and reports that as an invalid
+   field value. So deploying the module onto the fallback snapshot, which has an enrolment,
+   added nothing; the listener now says why in a warning.
+1. **The module's logging had always been invisible.** The portal logs `com.liferay.*` at
+   ERROR, and our package inherits it, so no INFO or WARN line the module ever wrote had
+   appeared. Its `module-log4j.xml` now sets its own level. A start-up pass that ran on one
+   deploy and not the next turned out to be a lazily activated component, now immediate.
+
+**Evidence.** #100; the test runs of 2026-10-20: the first full provision rolled back
+(`relation "o_…_mycourseenrollment" does not exist`), the second and third passed with the
+rule added after `Initialized` and a second registration refused with "You are already
+registered for this session." (an orange warning toast in the browser).
+
+### Lessons
+
+1. **Catching an exception doesn't save a transaction the database has already aborted.**
+   *Slide angle: The error was handled. The transaction was already dead.*
+
+1. **Test every path you claim.** "Also works on an existing site" was in the README until
+   the test said otherwise.
+
+1. **If you can't see a log line, check whether you could ever have seen it.**
+   *Slide angle: Silence in the log is not success; it might be a log level.*
+
+---
+
+## 2026-10-19 — A clock you can trust next to the log
+
+**What happened.** The time-lapse of provisioning carries a clock, so the audience sees how
+long each step really took while the video runs at 15x. It has to agree with the log
+window's timestamps, or the first sharp-eyed viewer stops trusting both. Three things could
+pull them apart, and one did:
+
+- **Time zone.** The clock started from the recording's metadata in the Mac's zone (BST),
+  while Liferay logs in UTC: an hour out. `--tz UTC` fixed it.
+- **Precision.** MOV stores its creation time in whole seconds. Trimming the recording at
+  19.5 s and writing the new start back came out as `.000`, half a second out, so the trim
+  now cuts on a whole second.
+- **Clock skew.** The log is stamped by Docker's virtual machine, the clock by the Mac. They
+  were +0.05 to +0.08 s apart: fine, but now checked before every take.
+
+**Evidence.** A frame where the site initializer's `Initialized` line (16:46:36.226) arrives
+shows the clock moving from 16:46:35 to 16:46:37, and the recorded take's check frame shows
+17:52:22 as the line stamped 17:52:22.802 arrives. `scripts/clock_overlay.py` (Peter's) and
+`scripts/make-timelapse.py`, #98 and #99.
+
+### Lessons
+
+1. **Put a timestamp next to a timestamp only if you have checked they agree.** A clock that
+   is an hour or half a second out undermines every log line on screen.
+   *Slide angle: Two clocks on one screen will be compared; make sure they agree.*
+
+1. **Check against an event, not a feeling.** The spot check takes one log line with a
+   known time, works out the frame where it must appear, and looks.
+
+---
+
+## 2026-10-19 — The red in the log is the platform warming up
+
+**What happened.** Every provisioning run shows red in the log window, and on a recording it
+looks alarming. Each one was traced:
+
+| When | What | Why it is harmless |
+| --- | --- | --- |
+| The restore | The database logs `FATAL` (`database "lportal" does not exist`, `the database system is shutting down`, `connection to client lost`) | The restore starts Postgres from empty, runs a temporary server to load the snapshot, and stops Liferay while it is still connected. The wording varies by run; the cause doesn't |
+| About 40 s after Liferay starts | Data set display tags throw `NullPointerException` (`fdsSerializer` is null), 6 to 21 pairs | A reindex task renders a data set component before its serializer service is up: a start-up race, before anything of ours is deployed |
+| Site creation | 2 `RESTClientTemplateContextContributor` `SecurityException`s | Fragment templates that call `restClient` render while the site is being built, with no user who has access |
+| Site creation | One search index delete fails | The entry wasn't in the index |
+
+Nothing red appears once the site is up, and the checks after provisioning all pass.
+
+**Evidence.** `docker logs` of the 2026-10-19 runs; the timings above are from the takes at
+16:43 and 17:47 UTC.
+
+### Lessons
+
+1. **A clean log is not the success criterion; the checks are.** Explain the red rather than
+   hide it. Hiding it reads as hiding something.
+   *Slide angle: The red lines are the restore at work. Watch what the checks say.*
+
+---
+
+## 2026-10-19 — A check that could never fail
+
+**What happened.** `ldm-provision.sh` ends with "errors since restore", listing every
+`ERROR` logged during the run. It printed nothing on every rehearsal, yet the log had
+dozens. It counted the log's lines before the restore and printed only what came after that
+line number, but the restore starts a new, shorter log file, so it was always reading past
+the end.
+
+**Evidence.** The 2026-10-19 rehearsals: the section empty each time, while `docker logs`
+showed the data set exceptions above. A fix is in progress, in its own PR.
+
+### Lessons
+
+1. **Test a check by making it fail.** A check that has never shown a failure is a guess.
+   *Slide angle: Green because it works, or green because it can't see?*
+
+---
+
+## 2026-10-19 — Two branches, one silent deletion
+
+**What happened.** Master was kept as the "before" state, so in October a change that
+landed there by mistake was reverted (#16). Merging 02 into master after the conversion
+would have deleted four files Approach 1 needs (the enrolment object, its status picklist
+and both enrolment relationships) and restored five old batch files, **with no conflict**:
+git applies a revert's deletion wherever the other side hasn't touched the file since. The
+trial merge in a scratch worktree showed it before anything reached master.
+
+**What we did.** Carried everything that only master had into 02 first (#92), then merged
+with master taking 02's tree exactly (#96). All 112 files master lost were traced to the
+02 commit that removed them on purpose. `devcon-start` keeps the before state.
+
+**Evidence.** #92, #96, and "A clean merge can delete the whole conversion" under "Earlier,
+from `.agent-state.md`" below, which saw the same trap in the other direction.
+
+### Lessons
+
+1. **A merge without conflicts is not a merge without changes.** Compare the result's tree
+   with what you meant, file by file.
+   *Slide angle: The most dangerous merge is the one that just works.*
+
+---
+
+## 2026-10-19 — The collection race, measured
+
+**What happened.** The race from 2026-10-16 (collections created after the pages that use
+them) hit **3 of 12** site creations on 19 October, including one recorded take. The site
+initializer still reports success when it happens. `ldm-provision.sh` now reads the handler
+order from the log and, when the collections lost the race, provisions again by itself, up
+to three times. On the recorded take it printed `RACE … provisioning again`, and the second
+attempt passed every check.
+
+**Evidence.** #90; `scripts/check-collections.sh` and the run logs of 19 October;
+UPSTREAM-FEEDBACK.md item 7 (LPD-110315).
+
+### Lessons
+
+1. **Count an intermittent failure before you call it rare.** One in four is not rare on a
+   stage.
+   *Slide angle: The safeguard caught it on camera.*
+
+---
+
+## 2026-10-19 — Known issue: students can approve or complete their own enrolment
+
+**What happened.** An enrolment's owner gets every action on it: update, delete, and every
+standalone object action. So a student can run `approveACourse` on their own Pending
+enrolment (204, now Approved), or PATCH its status straight to Completed (200). Pending
+stops nothing.
+
+**Decision.** Logged, not fixed before DevCon. The stage flow doesn't depend on it, and
+`student-check.sh` reports both as warnings rather than failures. Possible fixes, not yet
+evaluated: limit the Owner role's permissions on the object's actions, a validation rule on
+status changes, or approval through a workflow.
+
+**Evidence.** Tested as a site member on 02 at `7de77b5`, 2026-10-19; the two `WARN` lines in
+every `student-check.sh` run since.
+
+### Lessons
+
+1. **Pending is only a gate if the owner can't open it.** Check who can run each standalone
+   action, not just who can create the entry.
+
+---
+
+## 2026-10-19 — The register button only worked for admins
+
+**What happened.** Testing as an ordinary signed in member, not as admin, the register
+button failed twice over:
+
+1. It first looks the session up in MyCourseSession, and members had no VIEW on it: the
+   lookup returned 0 of 12, and the button said "not linked".
+1. Its enrolment links that session, and linking needs VIEW on the related entry: the POST
+   returned **403**. The same POST without the session link returned 200.
+
+REST tests run as admin had passed throughout. Separately, an enrolment created by an
+admin was invisible to the student it was for (404), because students only see enrolments
+they own. That ruled out seeding a Confirmed enrolment from the initializer or batch.
+
+**What we did.** #84 let signed in users enrol (ADD on MyCourseEnrollment for the User
+role); #86 moved the grants to Site Member and added VIEW on MyCourseSession. And
+`demo-prep.sh` gives the demo student a Confirmed course through the real flow, so the
+student owns it (#88).
+
+**Evidence.** #84, #86, #88; the two-user and student checks in `scripts/student-check.sh`.
+
+### Lessons
+
+1. **Test as the user who will click it.** Admin passes every permission check, so admin
+   tests prove nothing about permissions.
+   *Slide angle: It works on my admin account.*
+
+1. **A relationship is also a read.** Linking an entry to another needs VIEW on the other.
+
+---
+
+## 2026-10-19 — The demo student who couldn't sign in
+
+**What happened.** The site initializer created the demo student, added it to the site, and
+left it **Inactive**: signing in returned 401. The same JSON sent to the user API directly
+created an active user, so it looked like a bug. Then it was put down to an internal
+security request. The portal source settled it: `BundleSiteInitializer._addUserAccounts`
+sets every user it creates to inactive on purpose, so an initializer can't silently create
+accounts that can sign in (LPS-184738, 2023-12-26).
+
+**What we did.** `demo-prep.sh` activates the student as its first, scripted, documented step
+after provisioning, and the README says why.
+
+**Evidence.** #88; `000dba9c42` in liferay-portal (LPS-184738).
+
+### Lessons
+
+1. **Read the source before you name a cause.** It turned "bug" and "someone asked for it"
+   into one line of platform code with a ticket.
+   *Slide angle: The platform did exactly what it was told. It just wasn't us who told it.*
+
+---
+
+## 2026-10-19 — No feature flags needed for Approach 1
+
+**What happened.** The README had to say which feature flags to enable. The LDM instance had
+two on (`LPD-35443`, `LPS-178052`) with nothing recording whether Approach 1 needed them. A
+clean run with both switched off created the site, loaded the data and rendered every page.
+
+**Evidence.** #85; two clean runs of 02 at `7de77b5`, one with LDM's default flags and one
+with both off. (Approach 2's page specification edits do need `LPD-74328`; see the
+2026-10-15 entry under Approach 2.)
+
+### Lessons
+
+1. **Test the minimum, don't inherit it.** "These flags are on" is not "these flags are
+   needed".
+
+---
 
 ## 2026-10-16 — Correction: collection classPK is not string vs number, it is handler order
 
@@ -406,6 +731,91 @@ Carried over so they are in one place. The detail and evidence live in `.agent-s
 
 # Approach 2: live site, migrated in place
 
+## 2026-11-02 — The second run: a fresh AI session, Rafa's rules, and what it got wrong
+
+**What happened.** To give Rafa a stage instance on Peter's laptop, the migration was run again
+from scratch: the 2024 site from `devcon-start` on a clean 2026.q3.5, then a new Claude session
+given Rafa's rules (MCP first, Python only where MCP can't, never JSON-WS, never web search,
+don't touch the site initializer folders) and asked for a plan. It drafted the same shape Rafa's
+run of 28 October had: discovery, Space and structures, content, display page templates, pages and
+menus, verification, then deleting the old articles. Each phase was reviewed before the next, as
+Rafa does. The result matches his: four standalone structures (Blog, Teacher, Course, Classroom),
+all 30 files copied into the Space, the categories in `L_CMS`, the Courses dropdown repointed, and
+only the 20 old articles deleted. A signed-out check after the deletion found every page, all 15
+display pages and the 19 images and videos they use working, with nothing left on Journal.
+
+Rafa's own prompts after the plan were short go-aheads ("go with 2", "let's go with phase 3",
+"go ahead"), plus one scoping line before cleanup: "you dont need to delete the structures
+themselves or thecollections, just the old structured contents".
+
+It went wrong once, in the pages phase: every card's link and every course item in the menu came
+out empty, and every display page URL returned 404. The agent tried other link keys and URL
+patterns, then concluded it was a limit of Space entries. It wasn't. The database showed the three
+new display page templates bound to the generic `com.liferay.object.model.ObjectEntry` with no
+subtype (`classTypeId -1`), and none marked default, although the `markedAsDefault` PATCH had
+answered `true`. Rebound to each structure's own class (`ObjectDefinition#Z5S6` and so on) and
+marked default, the links resolved, and the menu items could then be created too.
+
+The other findings, all from this run:
+
+| Finding | Evidence |
+| --- | --- |
+| An entry gets a display page only from the **default** template bound to its **own structure's class**; the generic `ObjectEntry` class matches nothing | `layoutpagetemplateentry`: `classnameid` = `ObjectEntry`, `classtypeid -1`, `defaulttemplate f`; links resolved after the rebind |
+| A write's response is not proof: `markedAsDefault` came back `true` while the row said `false` | The same query |
+| The vocabulary mapping key needs the scope suffix, `AssetVocabulary__ERC__<vocab>__SERC__L_CMS`; the unscoped key renders nothing | Display page template payloads |
+| Images and videos need Guest `VIEW` and `DOWNLOAD_FILE` on the **Basic Document**; a grant on the entry that uses the file isn't enough (404) | Phase 5 signed-out check |
+| The permissions PUT needs `roleName` on every grant; leaving it out returns 500 and changes nothing | Phase 5 |
+| PATCHing a published field's type answers 200 and changes nothing; Text's 280-character limit is too short for some values, so those fields are LongText | Phase 1 |
+| A Basic Document can be created from the site's original file by pointing `fileURL` at it, without sending the bytes; Rafa's run did the same | Phase 2 |
+| The site-wide export-batch for web content only covers the root folder; all 20 articles were in subfolders | Phase 0 |
+
+**The lessons.**
+
+1. **Rafa's process carries over to another model and another person.** The same rules and the
+   same review after each phase produced the same end state as his Gemini runs.
+2. **The lessons log only helps if the agent reads it at the right moment.** The `/publish` stub
+   (PLATFORM-FACTS #12) and the menu items' Space scope (2026-10-15 entry) were both written
+   down, and the agent still hit both. Pointing it at the entry fixed each in one step.
+3. **Read back every write.** The one costly detour came from trusting a 200.
+4. **When an AI says "the platform can't", check the data first.** One database query turned "a
+   limit of Space entries" into a one-line fix.
+
+*Slide angle: same prompt, same rules, different AI: the process is the product. And: trust the
+read-back, not the response.*
+
+**Evidence:** snapshots `masterclass-start-bc57b1c` (before), `masterclass-approach2-precleanup`
+and `masterclass-approach2-063ee2f` (after) in the `masterclass-approach2` LDM project on Peter's
+laptop; the session's scripts and payloads, kept outside the repo; Rafa's recording of 28 October.
+
+## 2026-11-02 — Two instances on one laptop
+
+**What happened.** Both approaches will be shown from Peter's laptop, so Rafa's instance became a
+second LDM project running beside Peter's, each on its own host name:
+`approach1.devcon.demo:8080` and `approach2.devcon.demo:8081`. Separate host names also keep their
+cookies and sign-ins apart. Getting there took a day of traps, most of them silent:
+
+| Trap | What we saw | Evidence |
+| --- | --- | --- |
+| Index prefixes nest | A project named `devcon2026-approach2` would get indices matching Peter's `ldm-devcon2026-*`, so restoring Peter's would delete Rafa's. Renamed `masterclass-approach2` | LDM #2313 |
+| `ldm fork` is broken | It treated the new name as a remote target, copied the source's UUID and its index prefix. The project was built by hand from the clean snapshot instead | LDM #2314 |
+| A restore puts the old prefix back | The clean snapshot carries `ldm-devcon2026-` as the index prefix, and a restore copies it into the project. Both instances also share one company ID, so Rafa's startup reindex **emptied Peter's index**: 6,301 documents written, 12,614 deleted, 0 left. Fixed by restoring Peter's snapshot | Elasticsearch index stats |
+| The JIT flag ignores its setting | A normal start forces `-XX:TieredStopAtLevel=1`, and every authenticated request (PBKDF2 on Basic auth, so every MCP call) took 1.9 s instead of 0.22 s | LDM #2308; timings |
+| A restored index can be dead | After a restore, a shard reported started while every search answered 503 (`AlreadyClosedException`), so the reindex added nothing. Seen twice. Restarting the search container, then Liferay, fixed it | Elasticsearch log |
+| MCP needs a second switch | With `LPD-63311` on, `/o/mcp` still answered 404 until `MCPServerConfiguration` `enabled=true` was set | 404, then 200 |
+
+**The lessons.**
+
+1. **Don't restore during the talk.** A restore took 223 s plus the reindex, and twice in one day
+   a search index came back dead. Both instances run side by side, so switching is a change of
+   Chrome profile.
+2. **Isolation has to be checked, not assumed.** Separate projects still shared a search node, a
+   company ID and, through a copied setting, an index prefix.
+3. **Check search after every restore.** `_count` on the company index must answer with a number.
+   The restore script for Rafa's instance now fails when it doesn't.
+
+**Evidence:** LDM issues #2308, #2313 and #2314; `restore-stage.sh` in the
+`masterclass-approach2` LDM project.
+
 ## 2026-10-15 — Headless REST Deletions of legacy content bypass the Recycle Bin; new CMS entries do not
 
 **What happened.** While cleaning up legacy Web Content articles, Documents & Media files, and obsolete
@@ -719,139 +1129,104 @@ a plain `ObjectField_mainImage`.
 
 ---
 
-## 2026-10-15 — Headless CMS Space Categorization: Company scope with assetLibraries association
+## 2026-10-15 — Headless CMS Space Categorization: The L_CMS System Group (20121)
 
-**What happened.** When categorizing custom Object Entries in a Headless CMS Space (`depot` scope),
-passing site-scoped category IDs failed with `400: Asset category <id> does not belong to the object entry's scope`.
-Furthermore, creating a vocabulary directly via the asset library endpoint
-(`postAssetLibraryTaxonomyVocabulary`) created an internal vocabulary that was accepted by the API
-but completely hidden from the Liferay UI under **Space → Categorization → Categories**.
+**What happened.** When attempting to create a taxonomy vocabulary for modern Headless CMS, creating it in the classic Global site (`20129`) or via the specific Asset Library endpoint (`postAssetLibraryTaxonomyVocabulary`) caused the vocabulary to be completely absent from the **Applications → Headless CMS → Categorization** UI.
 
-To make a vocabulary both valid for depot-scoped entries and visible in the Space's UI, it must be
-created at the **Company/Global scope** with an explicit `assetLibraries` association:
-```json
-{
-  "name": "Masterclass",
-  "externalReferenceCode": "VOCAB_MASTERCLASS_SPACE",
-  "visibilityType": "PUBLIC",
-  "multiValued": true,
-  "assetLibraries": [
-    {
-      "id": 143544,
-      "externalReferenceCode": "SPACE-MASTERCLASS-CMS"
-    }
-  ],
-  "assetTypes": [
-    {
-      "type": "AllAssetTypes",
-      "subtype": "AllAssetSubtypes",
-      "required": false
-    }
-  ]
-}
-```
-Posting this body to `POST /v1.0/sites/{companyGroupId}/taxonomy-vocabularies` (`postSiteTaxonomyVocabulary`
-with `siteId: 20121`) creates the vocabulary. Categories added to it via
-`POST /v1.0/taxonomy-vocabularies/{id}/taxonomy-categories` inherit the Space association, render
-in the Space Categorization UI, and bind seamlessly to modern CMS entries via `"taxonomyCategoryIds": [<id>]`.
+**Root cause.** In Liferay DXP, the modern Headless CMS application is underpinned by a dedicated system group named **`CMS`** (`groupId: 20121`, `groupKey: "CMS"`, `externalReferenceCode: "L_CMS"`).
+The Headless CMS Categorization admin UI exclusively queries and renders vocabularies stored under `siteId: 20121`.
+To make a vocabulary render in the Headless CMS Categorization UI and be available across Space content entries:
+1. It MUST be created on the `CMS` system site (`siteId: 20121`):
+   `POST /o/headless-admin-taxonomy/v1.0/sites/20121/taxonomy-vocabularies` (`postSiteTaxonomyVocabulary`)
+2. It MUST configure `assetLibraries: [{"id": -1}]` (to make it available across all Spaces/Asset Libraries) or specify the exact Space ID (`[{"id": <spaceId>}]`), along with `projects: [{"id": -1}]` and `visibilityType: "PUBLIC"`:
+   ```json
+   {
+     "name": "Masterclass",
+     "externalReferenceCode": "VOCAB_MASTERCLASS_CMS",
+     "visibilityType": "PUBLIC",
+     "multiValued": true,
+     "assetLibraries": [{"id": -1}],
+     "projects": [{"id": -1}],
+     "assetTypes": [
+       {
+         "required": false,
+         "subtype": "AllAssetSubtypes",
+         "type": "AllAssetTypes",
+         "typeId": 0
+       }
+     ]
+   }
+   ```
+3. Categories are then added to this vocabulary via `POST /v1.0/taxonomy-vocabularies/{id}/taxonomy-categories`.
+4. Modern CMS object entries are categorized by passing the new category IDs in `"taxonomyCategoryIds": [<newId>]`.
 
 ### Lessons
 
-1. **Space vocabularies live at company scope with an `assetLibraries` association.** Liferay's
-   Space Categorization UI filters vocabularies by looking for company-level vocabularies explicitly
-   linked to the Space's groupId via the `assetLibraries` property array. To automate space vocabulary
-   provisioning, always call `postSiteTaxonomyVocabulary` on the company site (`20121`) passing
-   `"assetLibraries": [{"id": <spaceGroupId>, "externalReferenceCode": "<spaceERC>"}]`. Calling
-   `postAssetLibraryTaxonomyVocabulary` creates an unlinked vocabulary that the UI ignores.
-   *Slide angle: The taxonomy scope paradox: why Space vocabularies belong to the Company.*
+1. **Headless CMS Categorization lives in the `CMS` group (`groupId: 20121`).**
+   Do not confuse the classic portal Global site (`20129` / `L_GLOBAL`) with the modern Headless CMS
+   scope (`20121` / `L_CMS`). Headless CMS taxonomies must be created under `siteId: 20121` with
+   `assetLibraries: [{"id": -1}]`.
+   *Slide angle: The L_CMS discovery: where Headless CMS really looks for its taxonomies.*
 
 ---
 
-## 2026-10-15 — DAM ingestion via fileURL vs base64 and the ERC Recycle Bin trap
+## 2026-10-15 — Headless CMS Content Structure Modeling: title fields, attachment settings, and draft flags
 
-**What happened.** When migrating media assets from an existing site DAM into the modern
-Headless CMS Space (`CMSBasicDocument`), passing image data as inline `file.fileBase64`
-through API request buffers led to truncated payloads. The resulting document saved in
-the Space was corrupt (only a few kilobytes, failing image preview and downloads).
+**What happened.** When migrating legacy structured content models into modern depot-scoped
+Object Definitions for Headless CMS (`scope: "depot"`, `objectFolderExternalReferenceCode: "L_CMS_CONTENT_STRUCTURES"`),
+three critical modeling pitfalls emerged across the UI and API lifecycles:
 
-Additionally, when deleting the corrupted document to recreate it, a subsequent `POST` with
-the same `externalReferenceCode` failed with `400: This external reference code is already in use.`
-Deleting via Headless REST performs a soft delete, moving the entry to the Recycle Bin while
-retaining uniqueness constraints on its `externalReferenceCode`.
-
-Switching to `file.fileURL` pointing directly to the live document endpoint:
-```json
-{
-  "externalReferenceCode": "BLOG_IMG_01",
-  "title": "blog_01.jpg",
-  "objectEntryFolderExternalReferenceCode": "CMS_FOLDER_BLOG_IMAGES",
-  "file": {
-    "name": "blog_01.jpg",
-    "fileURL": "http://localhost:8080/documents/65391/0/blog_01.jpg/cf5929fe-...?download=true"
-  }
-}
-```
-allowed Liferay to stream the uncorrupted binary directly from source to destination at full
-fidelity. For the soft-deleted entry, calling the restore endpoint
-(`PUT .../by-external-reference-code/{erc}/restore`) followed by `PATCH` seamlessly updated
-the record without ERC collisions.
-
-### Lessons
-
-1. **Prefer `fileURL` over Base64 for headless asset migrations.** In modern CMS
-   (`CMSBasicDocument`), inline Base64 strings risk buffer truncation and memory bloat.
-   Supplying `file.fileURL` lets the portal fetch the binary directly over HTTP without
-   intermediate serialization overhead or truncation risks.
-   *Slide angle: Clean asset ingestion: why streaming beats Base64 in headless migrations.*
-
-2. **REST delete is a soft delete.** Deleting an object entry or document sends it to the
-   Recycle Bin, keeping its `externalReferenceCode` reserved. Recreating an entry with the
-   same ERC fails immediately. To replace an existing ERC, either restore and patch the
-   entry or assign a new unique ERC.
-   *Slide angle: The ghost in the trash: handling ERC collisions after REST deletion.*
-
----
-
-## 2026-10-15 — Attachment fileSource in Headless CMS: userComputer vs CMSBasicDocument item selector
-
-**What happened.** When authoring custom depot-scoped Object Definitions intended as Headless
-CMS Content Structures (`scope: "depot"`, `objectFolderExternalReferenceCode: "L_CMS_CONTENT_STRUCTURES"`),
-attachment fields configured with `"fileSource": "userComputerToCMSBasicDocument"` restricted
-the CMS editorial UI to a local disk file-picker only. Users could not browse or select existing
-media assets from the Space's CMS library / DAM. Furthermore, this prevented referencing
-already-migrated CMS documents by their `externalReferenceCode`.
-
-Updating the attachment field settings to `"fileSource": "CMSBasicDocument"`:
-```json
-{
-  "name": "image",
-  "businessType": "Attachment",
-  "objectFieldSettings": [
-    {"name": "acceptedFileExtensions", "value": "jpeg, jpg, pdf, png"},
-    {"name": "maximumFileSize", "value": 100},
-    {"name": "fileSource": "CMSBasicDocument"}
-  ]
-}
-```
-enabled the full **Item Selector** in the CMS editor, granting users the ability to both
-browse/select existing media assets in the library and upload new files from their computer.
-Crucially, Liferay allows live patching of `objectFieldSettings` on published attachment
-fields via `PATCH /o/object-admin/v1.0/object-fields/{id}` without deleting or recreating
-the object definition.
+1. **"Untitled Asset" in Content Listings:** In Headless CMS, the content listing table (Frontend Data Set / FDS table)
+   relies on the Object Definition's `titleObjectFieldName` property and looks for a localized text field named `title`.
+   When `Blog` was created, its legacy structure already had a field named `Title` mapped to `title`. But `Teacher`
+   and `Course` used `name`, and `Classroom` used `courseName`, while `titleObjectFieldName` was left unset (defaulting
+   to `externalReferenceCode`). As a result, the CMS frontend fell back to `Liferay.Language.get('untitled-asset')`
+   ("Untitled Asset"). Every custom CMS structure must declare a non-system, localized `title` field (`"name": "title"`,
+   `"required": false`, `"localized": true`, `"system": false`) and configure `"titleObjectFieldName": "title"`.
+2. **Restricted Item Selector (`fileSource`):** Configuring attachment fields with `"fileSource": "userComputerToCMSBasicDocument"`
+   locked the CMS editorial UI to local disk uploads only. Users could not browse or select existing media from the
+   Space library, nor could Headless API calls link documents by `externalReferenceCode`. Changing the setting to
+   `"fileSource": "CMSBasicDocument"` enables the full **Item Selector** (both library browsing and desktop upload).
+   Crucially, `objectFieldSettings` on published attachment fields can be patched live via
+   `PATCH /o/object-admin/v1.0/object-fields/{id}` without recreating the object definition.
+3. **Mandatory Draft & Versioning Flags:** Editorial CMS structures must enable draft (`"enableObjectEntryDraft": true`)
+   and versioning (`"enableObjectEntryVersioning": true`). Without these flags, CMS UI deletions fail, and lifecycle
+   operations (scheduled publishing, draft previews) return errors.
+4. **Linking CMSBasicDocument Attachments Requires the Internal File ID (`file.id`):** When populating an Object attachment
+   field configured with `"fileSource": "CMSBasicDocument"`, passing only `"externalReferenceCode"` and `"name"` causes Liferay
+   to create a detached empty attachment with `size: "0 B"` under `/documents/<scopeId>/0/...` instead of referencing the uploaded
+   document. To link to the real binary, the payload MUST pass the numeric primary key of the underlying file inside the
+   `CMSBasicDocument`:
+   ```json
+   "image": {
+     "id": cmsBasicDoc["file"]["id"],
+     "name": cmsBasicDoc["file"]["name"]
+   }
+   ```
+   This resolves the attachment to the full-size media asset (`/documents/<spaceId>/<folderId>/...`, full KB) and allows DPTs and
+   Collection Displays to render the image properly.
 
 ### Lessons
 
-1. **`CMSBasicDocument` gives both choices, `userComputer` locks to local only.** In modern
-   CMS structures, always prefer `"fileSource": "CMSBasicDocument"`. It provides the complete
-   Item Selector experience (library browsing + direct upload) and allows Headless API entries
-   to link media assets by `externalReferenceCode`.
+1. **"Untitled Asset" signals a missing title field or misconfigured titleObjectFieldName.**
+   Always include a non-system, localized `title` field and set `"titleObjectFieldName": "title"`
+   on the Object Definition so entries display their real titles in the Headless CMS content browser.
+   *Slide angle: Taming the "Untitled Asset": why CMS structures mandate titleObjectFieldName.*
+
+2. **`CMSBasicDocument` gives both choices; `userComputer` locks to local only.**
+   In modern CMS structures, always configure attachment fields with `"fileSource": "CMSBasicDocument"`
+   to support both library item selection and direct desktop upload.
    *Slide angle: Field settings that empower editors: why fileSource choice dictates DAM integration.*
 
-2. **Published field settings are live patchable.** Unlike structural constraints (such as
-   renaming fields or toggling versioning), `objectFieldSettings` on attachment fields can be
-   updated via `PATCH /v1.0/object-fields/{id}` on live, published definitions without data loss
-   or schema reprovisioning.
+3. **Published field settings are live patchable.** Unlike structural constraints,
+   `objectFieldSettings` on attachment fields can be updated via `PATCH /v1.0/object-fields/{id}`
+   on live definitions without data loss or reprovisioning.
    *Slide angle: Painless schema iteration: what you can and cannot patch live in Liferay Objects.*
+
+4. **Attachment fields must be populated with `file.id`, not document ERC alone.**
+   When populating an Object entry over Headless REST, an attachment field with `fileSource: "CMSBasicDocument"`
+   requires `"id": doc["file"]["id"]`. Passing only the document's ERC generates an empty 0-byte attachment.
+   *Slide angle: The 0-byte attachment trap: why Object attachments demand file.id.*
 
 ---
 

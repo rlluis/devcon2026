@@ -20,7 +20,7 @@ The project demonstrates two distinct migration methodologies:
 | Tag | State |
 | --- | --- |
 | `devcon-start` | The starting point: the 2024 Masterclass site initializer on web content (DDM structures, journal articles), renamed to Masterclass CMS and nothing else. Both approaches start here. |
-| `devcon-approach-1` | Approach 1's final state: the site initializer rebuilt on the Headless CMS, with the data batch, the demo student and the test scripts. The Approach 1 demo and its backup video were recorded from a provision of this state. |
+| `devcon-approach-1` | Approach 1's final state: the site initializer rebuilt on the Headless CMS, with the data batch, the demo student and the test scripts. The stage fallback snapshot was provisioned from this state; the provisioning time-lapse was recorded from an earlier commit whose provisioning is the same, before the post-provision steps changed. |
 | `devcon-approach-2` | Approach 2's final state: the live site migrated in place. |
 
 ```bash
@@ -30,6 +30,22 @@ git checkout devcon-approach-1   # after, Approach 1
 
 `step-01-initial` and `step-02-aiconversion` are earlier checkpoints from 6 October and are
 kept for history.
+
+---
+
+## Talk materials
+
+The slides and the Approach 1 videos from the talk are in [`talk-materials/`](talk-materials):
+
+| File | What it is |
+| --- | --- |
+| `devcon-2026-masterclass-slides.pptx` | The slide deck |
+| `approach-1-provisioning-recording.mp4` | The full Approach 1 provisioning run, recorded on 19 October (6 min 7 s) |
+| `approach-1-provisioning-timelapse-15x.mp4` | The same run as a 15x time-lapse with a real-time clock (22.6 s) |
+
+Both videos are H.264 MP4 (1080p, 30 fps) and play on Windows, macOS and Linux. The run was
+recorded from commit `b0684c3`; see the `devcon-approach-1` tag above and
+[TIMELAPSE.md](TIMELAPSE.md) for how the time-lapse was made.
 
 ---
 
@@ -127,7 +143,10 @@ For the summary table, descriptions, steps to reproduce, and technical pointers 
 ## Documentation Index
 
 * **[UPSTREAM-FEEDBACK.md](UPSTREAM-FEEDBACK.md)** — Detailed breakdown of reported bugs, feature requests, and engineering clues.
-* **[LESSONS-LEARNT.md](LESSONS-LEARNT.md)** — Chronological engineering log of discoveries, empirical measurements, and slide takeaways for the DevCon talk.
+* **[LESSONS-LEARNT.md](LESSONS-LEARNT.md)** — Decisions, and the chronological engineering log of discoveries, empirical measurements, and slide takeaways for the DevCon talk.
+* **[PLATFORM-FACTS.md](PLATFORM-FACTS.md)** — Liferay platform behaviour found along the way that an agent couldn't have known, and which agent file each fact belongs in.
+* **[TESTING-APPROACH-1.md](TESTING-APPROACH-1.md)** — Testing and recording Approach 1 end to end, with rollback for each stage.
+* **[TIMELAPSE.md](TIMELAPSE.md)** — Turning a screen recording into the clocked 15x time-lapse, on macOS or Windows, with a prompt for an AI session.
 * **[GETTING_STARTED.md](GETTING_STARTED.md)** — Local bundle initialization and workspace setup instructions.
 * **[GEMINI.md](GEMINI.md)** — Liferay Workspace standards, architectural principles, and AI agent execution rules.
 
